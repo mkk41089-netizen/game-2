@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>經典踩地雷</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #c0c0c0; /* 經典灰色背景 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            user-select: none; /* 防止選取文字 */
+        }
+
+        h1 { margin-bottom: 10px; color: #333; }
+
+        /* 遊戲資訊列 */
+        .header {
+            background: #c0c0c0;
+            border: 3px solid;
+            border-color: #808080 #fff #fff #808080; /* 內凹效果 */
+            padding: 10px;
+            width: 300px;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        /* 遊戲區域 */
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(10, 30px);
+            grid-template-rows: repeat(10, 30px);
+            border: 4px solid;
+            border-color: #fff #808080 #808080 #fff; /* 外凸效果 */
+        }
+
+        /* 每個格子的樣式 */
+        .cell {
+            width: 30px;
+            height: 30px;
+            background-color: #c0c0c0;
+            border: 2px solid;
+            border-color: #fff #808080 #808080 #fff; /* 按鈕浮起效果 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        /* 被點開的格子 */
+        .cell.revealed {
+            border: 1px solid #808080; /* 變平 */
+            background-color: #dcdcdc;
+        }
+
+        /* 地雷樣式 */
+        .cell.mine {
+            background-color: red;
+        }
+
+        /* 旗子樣式 */
+        .cell.flag {
+            color: red;
+        }
+
+        /* 數字顏色 */
+        .c1 { color: blue; }
+        .c2 { color: green; }
+        .c3 { color: red; }
+        .c4 { color: darkblue; }
+        .c5 { color: brown; }
+        .c6 { color: cyan; }
+        .c7 { color: black; }
+        .c8 { color: gray; }
+
+        button {
+            margin-top: 15px;
+            padding: 8px 16px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>經典踩地雷</h1>
+    
+    <div class="header">
+        <span id="flags-left">🚩 10</span>
+        <span id="status">😊 遊戲中</span>
+    </div>
+
+    <div id="grid"></div>
+
+    <button onclick="initGame()">🔄 重新開始</button>
+
+    <script>
+        const gridElement = document.getElementById('grid');
+        const flagsLeftElement = document.getElementById('flags-left');
+        const statusElement = document.getElementById('status');
+        
+        const width = 10;
+        const bombAmount = 10;
+        let squares = [];
+        let isGameOver = false;
+        let flags = 0;
+
+        // 初始化遊戲
+        function initGame() {
+            gridElement.innerHTML = '';
+            squares = [];
+            isGameOver = false;
+            flags = 0;
+            flagsLeftElement.innerHTML = '🚩 ' + bombAmount;
+            statusElement.innerHTML = '😊 遊戲中';
+            createBoard();
+        }
+
+        function createBoard() {
+            // 1. 隨機放置地雷
+            const bombsArray = Array(bombAmount).fill('bomb');
+            const emptyArray = Array(width * width - bombAmount).fill('valid');
+            const gameArray = emptyArray.concat(bombsArray);
+            const shuffledArray = gameArray.sort(() => Math.random() - 0.5);
+
+            for (let i = 0; i < width * width; i++) {
+                const square = document.createElement('div');
+                square.setAttribute('id', i);
+                square.classList.add('cell');
+                square.dataset.type = shuffledArray[i]; // 標記是否為地雷
+
+                // 左鍵點擊
+                square.addEventListener('click', function(e) {
+                    click(square);
+                });
+
+                // 右鍵插旗
+                square.oncontextmenu = function(e) {
+                    e.preventDefault();
+                    addFlag(square);
+                }
+
+                gridElement.appendChild(square);
+                squares.push(square);
+            }
+
+            // 計算周圍地雷數
+            for (let i = 0; i < squares.length; i++) {
+                let total = 0;
+                const isLeftEdge = (i % width === 0);
+                const isRightEdge = (i % width === width - 1);
+
+                if (squares[i].dataset.type === 'valid') {
+                    if (i > 0 && !isLeftEdge && squares[i - 1].dataset.type === 'bomb') total++;
+                    if (i > 9 && !isRightEdge && squares[i + 1 - width].dataset.type === 'bomb') total++;
+                    if (i > 10 && squares[i - width].dataset.type === 'bomb') total++;
+                    if (i > 11 && !isLeftEdge && squares[i - 1 - width].dataset.type === 'bomb') total++;
+                    if (i < 98 && !isRightEdge && squares[i + 1].dataset.type === 'bomb') total++;
+                    if (i < 90 && !isLeftEdge && squares[i - 1 + width].dataset.type === 'bomb') total++;
+                    if (i < 88 && !isRightEdge && squares[i + 1 + width].dataset.type === 'bomb') total++;
+                    if (i < 89 && squares[i + width].dataset.type === 'bomb') total++;
+                    squares[i].setAttribute('data', total);
+                }
+            }
+        }
+
+        // 插旗邏輯
+        function addFlag(square) {
+            if (isGameOver) return;
+            if (!square.classList.contains('revealed') && (flags < bombAmount)) {
+                if (!square.classList.contains('flag')) {
+                    square.classList.add('flag');
+                    square.innerHTML = '🚩';
+                    flags++;
+                    flagsLeftElement.innerHTML = '🚩 ' + (bombAmount - flags);
+                    checkForWin();
+                } else {
+                    square.classList.remove('flag');
+                    square.innerHTML = '';
+                    flags--;
+                    flagsLeftElement.innerHTML = '🚩 ' + (bombAmount - flags);
+                }
+            }
+        }
+
+        // 點擊邏輯
+        function click(square) {
+            let currentId = square.id;
+            if (isGameOver) return;
+            if (square.classList.contains('revealed') || square.classList.contains('flag')) return;
+
+            if (square.dataset.type === 'bomb') {
+                gameOver(square);
+            } else {
+                let total = square.getAttribute('data');
+                if (total != 0) {
+                    square.classList.add('revealed');
+                    square.innerHTML = total;
+                    square.classList.add('c' + total); // 加入顏色 class
+                    return;
+                }
+                checkSquare(square, currentId);
+            }
+            square.classList.add('revealed');
+        }
+
+        // 擴散邏輯 (當點到空白時自動打開周圍)
+        function checkSquare(square, currentId) {
+            const isLeftEdge = (currentId % width === 0);
+            const isRightEdge = (currentId % width === width - 1);
+
+            setTimeout(() => {
+                if (square.classList.contains('revealed')) return; // 防止重複檢查
+                square.classList.add('revealed');
+                
+                // 檢查周圍的8個格子
+                // 這裡的邏輯是遞迴 (Recursion)
+                let checkList = [];
+                // 左
+                if (currentId > 0 && !isLeftEdge) checkList.push(parseInt(currentId) - 1);
+                // 右上
+                if (currentId > 9 && !isRightEdge) checkList.push(parseInt(currentId) + 1 - width);
+                // 上
+                if (currentId > 10) checkList.push(parseInt(currentId) - width);
+                // 左上
+                if (currentId > 11 && !isLeftEdge) checkList.push(parseInt(currentId) - 1 - width);
+                // 右
+                if (currentId < 98 && !isRightEdge) checkList.push(parseInt(currentId) + 1);
+                // 左下
+                if (currentId < 90 && !isLeftEdge) checkList.push(parseInt(currentId) - 1 + width);
+                // 右下
+                if (currentId < 88 && !isRightEdge) checkList.push(parseInt(currentId) + 1 + width);
+                // 下
+                if (currentId < 89) checkList.push(parseInt(currentId) + width);
+
+                checkList.forEach(id => {
+                    const newSquare = document.getElementById(id);
+                    click(newSquare);
+                });
+            }, 10);
+        }
+
+        // 遊戲結束
+        function gameOver(square) {
+            statusElement.innerHTML = '💥 爆炸了!';
+            isGameOver = true;
+
+            // 顯示所有地雷
+            squares.forEach(square => {
+                if (square.dataset.type === 'bomb') {
+                    square.innerHTML = '💣';
+                    square.classList.remove('flag'); // 移除旗子以免混淆
+                    square.classList.add('revealed', 'mine');
+                }
+            });
+        }
+
+        // 檢查勝利
+        function checkForWin() {
+            let matches = 0;
+            for (let i = 0; i < squares.length; i++) {
+                if (squares[i].classList.contains('flag') && squares[i].dataset.type === 'bomb') {
+                    matches++;
+                }
+            }
+            if (matches === bombAmount) {
+                statusElement.innerHTML = '😎 你贏了!';
+                isGameOver = true;
+            }
+        }
+
+        // 啟動遊戲
+        initGame();
+    </script>
+</body>
+</html>
