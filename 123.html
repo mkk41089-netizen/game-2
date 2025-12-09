@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>踩地雷 (Minesweeper)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Custom Styles for Minesweeper specific colors */
+        .num-1 { color: #1976d2; }
+        .num-2 { color: #388e3c; }
+        .num-3 { color: #d32f2f; }
+        .num-4 { color: #7b1fa2; }
+        .num-5 { color: #ff8f00; }
+        .num-6 { color: #0097a7; }
+        .num-7 { color: #424242; }
+        .num-8 { color: #9e9e9e; }
+
+        /* Cell base styles */
+        .cell {
+            transition: background-color 0.1s;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* 3D effect for hidden cells */
+        .cell-hidden {
+            background-color: #cbd5e1; /* slate-300 */
+            box-shadow: inset 2px 2px 0px #f1f5f9, inset -2px -2px 0px #64748b;
+        }
+
+        .cell-revealed {
+            background-color: #e2e8f0; /* slate-200 */
+            border: 1px solid #cbd5e1;
+        }
+
+        .cell-hover:hover {
+            filter: brightness(1.05);
+        }
+
+        /* Prevent long press context menu on mobile */
+        body {
+            overscroll-behavior-y: contain;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen flex flex-col items-center py-4 font-sans text-slate-800 select-none">
+
+    <!-- Header / Title -->
+    <h1 class="text-3xl font-bold mb-4 text-slate-700">踩地雷</h1>
+
+    <!-- Controls & Info Bar -->
+    <div class="bg-white p-4 rounded-xl shadow-md w-full max-w-2xl mb-4 flex flex-col gap-4">
+        
+        <!-- Top Row: Difficulty & Status -->
+        <div class="flex justify-between items-center flex-wrap gap-2">
+            <select id="difficulty" class="bg-slate-100 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2">
+                <option value="easy">簡單 (9x9)</option>
+                <option value="medium">中等 (16x16)</option>
+                <option value="hard">困難 (30x16)</option>
+            </select>
+
+            <button onclick="initGame()" class="bg-yellow-400 hover:bg-yellow-500 text-white font-bold py-1 px-3 rounded-full shadow transition transform hover:scale-110" id="face-btn">
+                <i class="fa-solid fa-face-smile text-2xl text-slate-800"></i>
+            </button>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="flex justify-between items-center bg-slate-800 text-red-500 font-mono text-2xl p-2 rounded-lg border-4 border-slate-600">
+            <div id="mine-count" class="w-16 text-center">010</div>
+            <div id="timer" class="w-16 text-center text-right">000</div>
+        </div>
+    </div>
+
+    <!-- Game Board Container -->
+    <div class="relative overflow-auto max-w-full p-2 bg-slate-300 rounded-lg shadow-inner border-4 border-slate-400">
+        <div id="game-board" class="grid gap-0 bg-slate-400 mx-auto">
+            <!-- Grid will be generated here -->
+        </div>
+        
+        <!-- Game Over Overlay -->
+        <div id="overlay" class="hidden absolute inset-0 bg-black/50 flex items-center justify-center z-10 backdrop-blur-sm rounded-lg">
+            <div class="bg-white p-6 rounded-2xl shadow-2xl text-center transform scale-110">
+                <h2 id="overlay-title" class="text-3xl font-bold mb-2"></h2>
+                <p id="overlay-msg" class="text-slate-600 mb-4"></p>
+                <button onclick="initGame()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full transition shadow-lg">
+                    再玩一次
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Controls (Action Mode Toggle) -->
+    <div class="fixed bottom-6 z-20 flex gap-4 bg-white/90 backdrop-blur p-2 rounded-full shadow-xl border border-slate-200 md:hidden">
+        <button id="mode-dig" class="w-14 h-14 rounded-full flex items-center justify-center text-xl transition bg-blue-600 text-white shadow-lg ring-2 ring-blue-300" onclick="setMode('dig')">
+            <i class="fa-solid fa-shovel"></i>
+        </button>
+        <button id="mode-flag" class="w-14 h-14 rounded-full flex items-center justify-center text-xl transition bg-slate-200 text-slate-500" onclick="setMode('flag')">
+            <i class="fa-solid fa-flag"></i>
+        </button>
+    </div>
+
+    <div class="mt-4 text-slate-500 text-sm md:block hidden">
+        <p><i class="fa-solid fa-computer-mouse"></i> 左鍵：挖掘 | 右鍵：插旗</p>
+    </div>
+    <div class="mt-2 text-slate-500 text-xs md:hidden block">
+        <p>使用下方按鈕切換模式，或長按插旗</p>
+    </div>
+
+    <script>
+        // Configuration
+        const LEVELS = {
+            easy: { rows: 9, cols: 9, mines: 10 },
+            medium: { rows: 16, cols: 16, mines: 40 },
+            hard: { rows: 16, cols: 30, mines: 99 }
+        };
+
+        // State
+        let currentLevel = 'easy';
+        let board = [];
+        let minesCount = 0;
+        let flagsUsed = 0;
+        let timerInterval;
+        let timeElapsed = 0;
+        let isGameOver = false;
+        let firstClick = true;
+        let actionMode = 'dig'; // 'dig' or 'flag' (for mobile)
+
+        // DOM Elements
+        const boardEl = document.getElementById('game-board');
+        const mineCountEl = document.getElementById('mine-count');
+        const timerEl = document.getElementById('timer');
+        const faceBtn = document.getElementById('face-btn');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayMsg = document.getElementById('overlay-msg');
+        const difficultySelect = document.getElementById('difficulty');
+        const modeDigBtn = document.getElementById('mode-dig');
+        const modeFlagBtn = document.getElementById('mode-flag');
+
+        // Initialize
+        difficultySelect.addEventListener('change', (e) => {
+            currentLevel = e.target.value;
+            initGame();
+        });
+
+        // Prevent right click context menu on game board
+        boardEl.addEventListener('contextmenu', e => e.preventDefault());
+
+        initGame();
+
+        function initGame() {
+            // Reset State
+            clearInterval(timerInterval);
+            timerInterval = null;
+            timeElapsed = 0;
+            isGameOver = false;
+            firstClick = true;
+            flagsUsed = 0;
+            
+            const config = LEVELS[currentLevel];
+            minesCount = config.mines;
+            
+            // Update UI
+            timerEl.textContent = '000';
+            updateMineCount();
+            faceBtn.innerHTML = '<i class="fa-solid fa-face-smile text-2xl text-slate-800"></i>';
+            overlay.classList.add('hidden');
+            
+            // Build Grid CSS
+            boardEl.style.gridTemplateColumns = `repeat(${config.cols}, minmax(0, 1fr))`;
+            // Keep cells square-ish but responsive
+            const cellSize = currentLevel === 'hard' || window.innerWidth < 500 ? '28px' : '36px';
+            
+            // Create Board Data
+            board = [];
+            boardEl.innerHTML = '';
+
+            for (let r = 0; r < config.rows; r++) {
+                let row = [];
+                for (let c = 0; c < config.cols; c++) {
+                    const cellData = {
+                        r, c,
+                        isMine: false,
+                        isRevealed: false,
+                        isFlagged: false,
+                        neighborMines: 0
+                    };
+                    row.push(cellData);
+
+                    // Create DOM Element
+                    const cellEl = document.createElement('div');
+                    cellEl.style.width = cellSize;
+                    cellEl.style.height = cellSize;
+                    cellEl.style.fontSize = parseInt(cellSize) * 0.6 + 'px';
+                    cellEl.className = 'cell cell-hidden flex items-center justify-center font-bold cursor-pointer text-slate-700 select-none';
+                    cellEl.dataset.r = r;
+                    cellEl.dataset.c = c;
+                    
+                    // Event Listeners
+                    cellEl.addEventListener('click', () => handleClick(r, c));
+                    cellEl.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        handleRightClick(r, c);
+                    });
+                    
+                    // Long press for mobile flagging (if not using toggle)
+                    let pressTimer;
+                    cellEl.addEventListener('touchstart', () => {
+                        pressTimer = setTimeout(() => {
+                            if (!isGameOver) {
+                                handleRightClick(r, c);
+                                navigator.vibrate && navigator.vibrate(50); // Haptic feedback
+                            }
+                        }, 500);
+                    }, {passive: true});
+                    cellEl.addEventListener('touchend', () => clearTimeout(pressTimer));
+                    cellEl.addEventListener('touchmove', () => clearTimeout(pressTimer));
+
+                    boardEl.appendChild(cellEl);
+                    cellData.element = cellEl;
+                }
+                board.push(row);
+            }
+        }
+
+        function placeMines(excludeR, excludeC) {
+            const config = LEVELS[currentLevel];
+            let minesPlaced = 0;
+            
+            while (minesPlaced < config.mines) {
+                const r = Math.floor(Math.random() * config.rows);
+                const c = Math.floor(Math.random() * config.cols);
+
+                // Don't place mine on the first clicked cell or its neighbors (to ensure a 0 opening)
+                if (!board[r][c].isMine && Math.abs(r - excludeR) <= 1 && Math.abs(c - excludeC) <= 1) {
+                    continue;
+                }
+
+                if (!board[r][c].isMine) {
+                    board[r][c].isMine = true;
+                    minesPlaced++;
+                }
+            }
+
+            // Calculate numbers
+            for (let r = 0; r < config.rows; r++) {
+                for (let c = 0; c < config.cols; c++) {
+                    if (!board[r][c].isMine) {
+                        board[r][c].neighborMines = countNeighbors(r, c);
+                    }
+                }
+            }
+        }
+
+        function countNeighbors(r, c) {
+            let count = 0;
+            const config = LEVELS[currentLevel];
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const nr = r + i;
+                    const nc = c + j;
+                    if (nr >= 0 && nr < config.rows && nc >= 0 && nc < config.cols) {
+                        if (board[nr][nc].isMine) count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        function startTimer() {
+            timerInterval = setInterval(() => {
+                timeElapsed++;
+                timerEl.textContent = timeElapsed.toString().padStart(3, '0');
+                if (timeElapsed >= 999) clearInterval(timerInterval);
+            }, 1000);
+        }
+
+        function setMode(mode) {
+            actionMode = mode;
+            if (mode === 'dig') {
+                modeDigBtn.classList.add('bg-blue-600', 'text-white', 'shadow-lg', 'ring-2', 'ring-blue-300');
+                modeDigBtn.classList.remove('bg-slate-200', 'text-slate-500');
+                modeFlagBtn.classList.add('bg-slate-200', 'text-slate-500');
+                modeFlagBtn.classList.remove('bg-red-600', 'text-white', 'shadow-lg', 'ring-2', 'ring-red-300');
+            } else {
+                modeFlagBtn.classList.add('bg-red-600', 'text-white', 'shadow-lg', 'ring-2', 'ring-red-300');
+                modeFlagBtn.classList.remove('bg-slate-200', 'text-slate-500');
+                modeDigBtn.classList.add('bg-slate-200', 'text-slate-500');
+                modeDigBtn.classList.remove('bg-blue-600', 'text-white', 'shadow-lg', 'ring-2', 'ring-blue-300');
+            }
+        }
+
+        function handleClick(r, c) {
+            if (isGameOver) return;
+            
+            // Mobile Action Toggle Logic
+            // If screen is narrow (mobile) and mode is flag, treat left click as flag
+            const isMobile = window.innerWidth < 768; // simple check
+            if (isMobile && actionMode === 'flag') {
+                handleRightClick(r, c);
+                return;
+            }
+
+            const cell = board[r][c];
+            if (cell.isFlagged) return; // Can't click flagged cells
+
+            if (firstClick) {
+                firstClick = false;
+                placeMines(r, c);
+                startTimer();
+            }
+
+            if (cell.isRevealed) {
+                // Chord logic (reveal neighbors if flags match number)
+                chord(r, c);
+                return;
+            }
+
+            reveal(r, c);
+        }
+
+        function handleRightClick(r, c) {
+            if (isGameOver || (firstClick && !timerInterval)) return;
+            
+            const cell = board[r][c];
+            if (cell.isRevealed) return;
+
+            cell.isFlagged = !cell.isFlagged;
+            flagsUsed += cell.isFlagged ? 1 : -1;
+            updateMineCount();
+
+            updateCellVisual(r, c);
+        }
+
+        function reveal(r, c) {
+            const config = LEVELS[currentLevel];
+            // Boundary checks
+            if (r < 0 || r >= config.rows || c < 0 || c >= config.cols) return;
+            
+            const cell = board[r][c];
+            if (cell.isRevealed || cell.isFlagged) return;
+
+            cell.isRevealed = true;
+            updateCellVisual(r, c);
+
+            if (cell.isMine) {
+                triggerGameOver(false);
+                return;
+            }
+
+            if (cell.neighborMines === 0) {
+                // Flood fill
+                for (let i = -1; i <= 1; i++) {
+                    for (let j = -1; j <= 1; j++) {
+                        reveal(r + i, c + j);
+                    }
+                }
+            }
+
+            checkWin();
+        }
+
+        function chord(r, c) {
+            const cell = board[r][c];
+            if (!cell.isRevealed || cell.neighborMines === 0) return;
+
+            const config = LEVELS[currentLevel];
+            let flagCount = 0;
+            
+            // Count surrounding flags
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const nr = r + i;
+                    const nc = c + j;
+                    if (nr >= 0 && nr < config.rows && nc >= 0 && nc < config.cols) {
+                        if (board[nr][nc].isFlagged) flagCount++;
+                    }
+                }
+            }
+
+            // If flags match mines, reveal neighbors
+            if (flagCount === cell.neighborMines) {
+                let hitMine = false;
+                for (let i = -1; i <= 1; i++) {
+                    for (let j = -1; j <= 1; j++) {
+                        const nr = r + i;
+                        const nc = c + j;
+                        if (nr >= 0 && nr < config.rows && nc >= 0 && nc < config.cols) {
+                            const neighbor = board[nr][nc];
+                            if (!neighbor.isRevealed && !neighbor.isFlagged) {
+                                neighbor.isRevealed = true;
+                                updateCellVisual(nr, nc);
+                                if (neighbor.isMine) hitMine = true;
+                                else if (neighbor.neighborMines === 0) {
+                                    // Trigger flood fill from this neighbor
+                                    // We need to re-call reveal recursively properly
+                                    // But since we just set isRevealed=true manually, let's just use reveal logic
+                                    // Actually, cleaner to just call reveal() on neighbors
+                                    neighbor.isRevealed = false; // Reset to let reveal() handle it
+                                    reveal(nr, nc);
+                                }
+                            }
+                        }
+                    }
+                }
+                if (hitMine) triggerGameOver(false);
+                else checkWin();
+            }
+        }
+
+        function updateCellVisual(r, c) {
+            const cell = board[r][c];
+            const el = cell.element;
+
+            if (cell.isRevealed) {
+                el.classList.remove('cell-hidden');
+                el.classList.add('cell-revealed');
+                el.classList.remove('cell-hover');
+
+                if (cell.isMine) {
+                    el.classList.add('bg-red-500');
+                    el.innerHTML = '<i class="fa-solid fa-bomb text-slate-800"></i>';
+                } else if (cell.neighborMines > 0) {
+                    el.textContent = cell.neighborMines;
+                    el.className = `cell cell-revealed flex items-center justify-center font-bold cursor-default select-none num-${cell.neighborMines}`;
+                } else {
+                    el.textContent = '';
+                }
+            } else {
+                el.classList.add('cell-hidden');
+                el.classList.remove('cell-revealed');
+                el.classList.add('cell-hover');
+
+                if (cell.isFlagged) {
+                    el.innerHTML = '<i class="fa-solid fa-flag text-red-600 text-sm"></i>';
+                } else {
+                    el.innerHTML = '';
+                }
+            }
+        }
+
+        function updateMineCount() {
+            const remaining = minesCount - flagsUsed;
+            mineCountEl.textContent = remaining.toString().padStart(3, '0');
+        }
+
+        function checkWin() {
+            const config = LEVELS[currentLevel];
+            let revealedCount = 0;
+            for (let r = 0; r < config.rows; r++) {
+                for (let c = 0; c < config.cols; c++) {
+                    if (board[r][c].isRevealed) revealedCount++;
+                }
+            }
+
+            const totalCells = config.rows * config.cols;
+            if (revealedCount === totalCells - config.mines) {
+                triggerGameOver(true);
+            }
+        }
+
+        function triggerGameOver(win) {
+            isGameOver = true;
+            clearInterval(timerInterval);
+
+            // Reveal all mines
+            const config = LEVELS[currentLevel];
+            for (let r = 0; r < config.rows; r++) {
+                for (let c = 0; c < config.cols; c++) {
+                    const cell = board[r][c];
+                    if (cell.isMine && !cell.isFlagged) {
+                        cell.element.innerHTML = '<i class="fa-solid fa-bomb"></i>';
+                        if (!win) cell.element.classList.add('bg-red-400', 'text-white');
+                    } else if (!cell.isMine && cell.isFlagged) {
+                        // Wrong flag
+                        cell.element.innerHTML = '<i class="fa-solid fa-xmark text-red-800"></i>';
+                        cell.element.classList.add('bg-red-200');
+                    }
+                }
+            }
+
+            if (win) {
+                faceBtn.innerHTML = '<i class="fa-solid fa-sunglasses text-2xl text-slate-800"></i>';
+                overlayTitle.textContent = "恭喜獲勝！";
+                overlayTitle.className = "text-3xl font-bold mb-2 text-green-600";
+                overlayMsg.textContent = `你用了 ${timeElapsed} 秒完成挑戰。`;
+            } else {
+                faceBtn.innerHTML = '<i class="fa-solid fa-face-dizzy text-2xl text-slate-800"></i>';
+                overlayTitle.textContent = "遊戲結束";
+                overlayTitle.className = "text-3xl font-bold mb-2 text-red-600";
+                overlayMsg.textContent = "踩到地雷了！別灰心，再試一次吧。";
+            }
+
+            setTimeout(() => {
+                overlay.classList.remove('hidden');
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
